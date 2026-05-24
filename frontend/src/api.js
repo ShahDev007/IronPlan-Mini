@@ -1,4 +1,6 @@
-const BASE = import.meta.env.VITE_API_URL || ''
+// VITE_API_URL = external domain only, e.g. https://my-railway-app.up.railway.app
+// Leave unset on Vercel — same-domain /api/* routing handles it automatically.
+const BASE = (import.meta.env.VITE_API_URL || '') + '/api'
 
 async function request(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, options)

@@ -19,11 +19,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(equipment.router)
-app.include_router(facilities.router)
-app.include_router(rooms.router)
+# All routes are prefixed with /api so Vercel can route /api/* to the
+# Python serverless function while serving the frontend at /.
+app.include_router(equipment.router,  prefix="/api")
+app.include_router(facilities.router, prefix="/api")
+app.include_router(rooms.router,      prefix="/api")
 
 
-@app.get("/health", tags=["meta"])
+@app.get("/api/health", tags=["meta"])
 def health():
     return {"status": "ok"}
