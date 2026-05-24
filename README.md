@@ -1,175 +1,166 @@
 # IronPlan Mini
 
-A production-deployed facility equipment tracker built for correctional facilities. Designed for capital planning — tracking condition scores, replacement costs, and inspection history across every room in a detention center.
+A production-deployed facility equipment tracker for correctional facilities. Facility managers use it to monitor equipment condition, prioritize replacements, and plan capital budgets.
+
+**Live demo:** https://ironplan-mini.vercel.app
+
+---
+
+## What it does
+
+- **Floor plan view** — Visual map of a jail wing. Each room shows equipment count and a critical-item indicator. Click any room to see its full equipment list, color-coded by condition score (1 = critical → 5 = excellent).
+- **Capital planning dashboard** — Condition breakdown charts and total replacement cost across the facility. The view a director brings to a budget meeting.
+- **CSV upload** — Drop a CSV directly in the browser to bulk-insert equipment records.
+- **S3 ingest** — Enter an S3 object key; the backend pulls the file from the bucket, validates every row with pandas, and loads clean records into the database. Bad rows are reported back without blocking the good ones.
+
+---
+
+## Tech stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 18, Tailwind CSS, Recharts |
+| Backend | FastAPI (Python 3.12), psycopg2, pandas, boto3 |
+| Database | Supabase (PostgreSQL) — views, triggers, indexes |
+| File storage | AWS S3 |
+| Deployment | Vercel (frontend + backend as serverless functions) |
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          CLIENT (Browser)                           │
-│                                                                     │
-│   React + Tailwind CSS                   Vercel (CDN)              │
-│   ┌─────────────────────────────────────────────────────────┐      │
-│   │  Sidebar  │  SVG Floor Plan  │  Equipment Panel         │      │
-│   │           │  (clickable rooms│  (condition badges,      │      │
-│   │  nav +    │   critical dots) │   costs, dates)          │      │
-│   │  summary  ├──────────────────┤                          │      │
-│   │  stats    │  Capital Planning Dashboard                  │      │
-│   │           │  (stat cards + Recharts bar chart)          │      │
-│   └─────────────────────────────────────────────────────────┘      │
-└───────────────────────────────┬─────────────────────────────────────┘
-                                │ HTTPS (REST JSON)
-                                ▼
-┌───────────────────────────────────────────────────────────────────┐
-│                    FastAPI  (Railway)                             │
-│                                                                   │
-│  POST /equipment/upload      ← pandas CSV validation             │
-│  GET  /facilities/{id}/equipment                                 │
-│  GET  /facilities/{id}/report   ← capital planning summary       │
-│  GET  /rooms/{id}/equipment                                      │
-│                                                                   │
-│  psycopg2 ThreadedConnectionPool  (maxconn=10)                   │
-└───────────────────────────────┬───────────────────────────────────┘
-                                │ PostgreSQL wire protocol
-                                ▼
-┌───────────────────────────────────────────────────────────────────┐
-│                   Supabase (PostgreSQL 15)                        │
-│                                                                   │
-│   facilities  →  rooms  →  equipment  →  inspections             │
-│                                                                   │
-│   Views:  v_equipment_full     (flat join for API reads)         │
-│           v_capital_summary    (aggregated report per facility)  │
-└───────────────────────────────────────────────────────────────────┘
-                                ▲
-                    boto3       │
-┌───────────────────────────────┴───────────────────────────────────┐
-│   onboard_facility.py  (CLI script)                              │
-│                                                                   │
-│   S3 Bucket  →  pandas validate  →  psycopg2 bulk insert         │
-│   (facility CSV drop zone)                                       │
-└───────────────────────────────────────────────────────────────────┘
-         ▲
-         │
-    AWS S3  (ironplan-uploads bucket)
+Browser (React)
+    │
+    │  HTTPS  /_/backend/api/*
+    ▼
+Vercel Serverless (FastAPI)
+    │                    │
+    │ psycopg2           │ boto3
+    ▼                    ▼
+Supabase (PostgreSQL)   AWS S3
 ```
+
+The frontend and backend are co-deployed on Vercel using `experimentalServices`. Vercel routes `/` to the Vite build and `/_/backend/*` to the Python ASGI app. The backend connects to Supabase via the Transaction Pooler (port 6543, IPv4) — required because Vercel Hobby doesn't support outbound IPv6.
 
 ---
 
-## Project Structure
+## Database schema
+
+```
+facilities
+    └── rooms           (facility_id → facilities.id)
+            └── equipment       (room_id → rooms.id)
+                    └── inspections     (equipment_id → equipment.id)
+```
+
+Key columns on `equipment`: `condition_score SMALLINT CHECK (1–5)`, `replacement_cost NUMERIC(12,2)`, `last_inspected DATE`.
+
+Two views power the API:
+- `v_equipment_full` — flat join of equipment + room + facility
+- `v_capital_summary` — aggregated condition counts and replacement costs per facility
+
+---
+
+## API endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/facilities/{id}/equipment` | All equipment for a facility |
+| GET | `/api/facilities/{id}/report` | Capital planning summary + per-room breakdown |
+| GET | `/api/rooms/{id}/equipment` | Equipment in a single room, ordered by condition |
+| POST | `/api/equipment/upload` | Bulk-insert from a direct CSV upload |
+| POST | `/api/equipment/ingest-s3` | Pull a CSV from S3 and bulk-insert |
+| GET | `/api/health` | Health check |
+
+---
+
+## S3 ingest pipeline
+
+```
+S3 bucket
+    │  boto3 download
+    ▼
+pandas validation
+    │  drop bad rows, report them
+    ▼
+psycopg2 bulk insert → Supabase
+    │
+    ▼
+JSON response  { rows_received, rows_inserted, rows_skipped, errors }
+```
+
+A sample CSV is included at `sample_s3_upload.csv`. Upload it to your bucket under `uploads/` and use the key `uploads/sample_s3_upload.csv` in the UI to test the full pipeline.
+
+The same logic is also available as a CLI script (`onboard_facility.py`) for batch onboarding jobs.
+
+---
+
+## Project structure
 
 ```
 IronPlan_Mini/
-├── database/
-│   ├── schema.sql            # All tables, indexes, views, triggers
-│   └── seed.sql              # Lincoln County Detention Center demo data
-│
+├── api/
+│   └── index.py              # Vercel entrypoint — adds backend/ to sys.path
 ├── backend/
-│   ├── main.py               # FastAPI app + CORS
-│   ├── config.py             # pydantic-settings env loader
+│   ├── main.py               # FastAPI app, CORS, router registration
+│   ├── config.py             # pydantic-settings env var loading
 │   ├── db.py                 # psycopg2 connection pool
 │   ├── models.py             # Pydantic response models
-│   ├── requirements.txt
-│   ├── Procfile              # Railway deploy command
-│   ├── .env.example
 │   └── routers/
-│       ├── equipment.py      # POST /equipment/upload
-│       ├── facilities.py     # GET /facilities/{id}/equipment + /report
-│       └── rooms.py          # GET /rooms/{id}/equipment
-│
+│       ├── equipment.py      # /upload and /ingest-s3 endpoints
+│       ├── facilities.py     # /equipment and /report endpoints
+│       └── rooms.py          # room equipment endpoint
+├── database/
+│   ├── schema.sql            # Tables, views, triggers, indexes
+│   └── seed.sql              # Lincoln County Detention Center demo data
 ├── frontend/
-│   ├── index.html
-│   ├── package.json          # React 18, Recharts, Tailwind, Vite
-│   ├── vite.config.js
-│   ├── .env.example          # VITE_API_URL + VITE_FACILITY_ID
 │   └── src/
-│       ├── App.jsx
-│       ├── api.js
-│       ├── components/
-│       │   ├── Sidebar.jsx
-│       │   ├── FloorPlan.jsx        # SVG jail wing — 7 rooms
-│       │   ├── EquipmentPanel.jsx
-│       │   ├── ConditionBadge.jsx
-│       │   ├── Dashboard.jsx        # Stat cards + Recharts bar chart
-│       │   ├── FilterBar.jsx
-│       │   └── CsvUpload.jsx
-│       └── pages/
-│           ├── FloorPlanPage.jsx
-│           └── DashboardPage.jsx
-│
-├── onboard_facility.py       # S3 → pandas → psycopg2 CLI onboarding script
-└── docs/
-    ├── onboarding_runbook.md
-    └── user_story.md
+│       ├── api.js            # Fetch wrappers for all endpoints
+│       ├── App.jsx           # Root — data fetching and state
+│       ├── pages/
+│       │   ├── FloorPlanPage.jsx
+│       │   └── DashboardPage.jsx
+│       └── components/
+│           ├── FloorPlan.jsx       # SVG floor plan with room selection
+│           ├── EquipmentPanel.jsx
+│           ├── Dashboard.jsx
+│           ├── CsvUpload.jsx
+│           ├── S3Ingest.jsx
+│           ├── FilterBar.jsx
+│           ├── ConditionBadge.jsx
+│           └── Sidebar.jsx
+├── onboard_facility.py       # CLI: S3 → pandas → Supabase ingestion
+├── sample_s3_upload.csv      # Sample equipment CSV for S3 demo
+└── vercel.json               # experimentalServices multi-service config
 ```
 
 ---
 
-## Setup & Deployment
+## Environment variables
 
-### 1. Supabase (Database)
-
-1. Create a new Supabase project at [supabase.com](https://supabase.com).
-2. In the SQL Editor, run `database/schema.sql`.
-3. Run `database/seed.sql` to load Lincoln County demo data.
-4. Note your **connection string** from Project Settings → Database → Connection string (Session mode, port 5432).
-
-### 2. Backend (Railway)
-
-1. Push the repo to GitHub.
-2. Create a new Railway project → Deploy from GitHub repo.
-3. Set the **root directory** to `backend/` in Railway settings.
-4. Add environment variables in Railway:
-   ```
-   DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres
-   AWS_ACCESS_KEY_ID=...
-   AWS_SECRET_ACCESS_KEY=...
-   AWS_REGION=us-east-1
-   S3_BUCKET=ironplan-uploads
-   ```
-5. Railway auto-detects `Procfile` and starts `uvicorn`.
-6. Note the generated Railway domain (e.g. `https://ironplan-mini.up.railway.app`).
-
-### 3. Frontend (Vercel)
-
-1. In Vercel, import the GitHub repo.
-2. Set **root directory** to `frontend/`.
-3. Add environment variables in Vercel:
-   ```
-   VITE_API_URL=https://ironplan-mini.up.railway.app
-   VITE_FACILITY_ID=11111111-1111-1111-1111-111111111111
-   ```
-4. Deploy. Vercel detects Vite automatically.
-
-### 4. Local Development
-
-```bash
-# Backend
-cd backend
-cp .env.example .env          # fill in DATABASE_URL
-pip install -r requirements.txt
-uvicorn backend.main:app --reload
-
-# Frontend (separate terminal)
-cd frontend
-cp .env.example .env.local    # fill in VITE_API_URL + VITE_FACILITY_ID
-npm install
-npm run dev
-```
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | Supabase Transaction Pooler connection string |
+| `AWS_ACCESS_KEY_ID` | IAM user access key (S3 read access) |
+| `AWS_SECRET_ACCESS_KEY` | IAM user secret key |
+| `AWS_REGION` | S3 bucket region (default: `us-east-1`) |
+| `S3_BUCKET` | S3 bucket name |
+| `VITE_FACILITY_ID` | UUID of the demo facility (frontend) |
+| `VITE_API_URL` | API base URL (leave unset on Vercel — same-domain routing) |
 
 ---
 
-## CSV Upload Format
+## CSV format
 
-The `/equipment/upload` endpoint and `onboard_facility.py` both accept CSVs with this schema:
+Both the upload endpoint and the S3 pipeline accept CSVs with this schema:
 
 | Column | Required | Type | Notes |
-|---|---|---|---|
-| `room_id` | yes | UUID | Must match a room in the DB |
+|--------|----------|------|-------|
+| `room_id` | yes | UUID | Must match an existing room |
 | `name` | yes | string | Equipment display name |
-| `type` | yes | string | door, lock, intercom, camera, alarm, other |
-| `condition_score` | yes | integer | 1–5 (1=Critical, 5=Excellent) |
+| `type` | yes | string | Category label |
+| `condition_score` | yes | integer | 1–5 (1 = Critical, 5 = Excellent) |
 | `last_inspected` | no | YYYY-MM-DD | |
 | `replacement_cost` | no | decimal | USD |
 | `notes` | no | string | |
@@ -179,28 +170,16 @@ The `/equipment/upload` endpoint and `onboard_facility.py` both accept CSVs with
 
 ---
 
-## Design Decisions
+## Design decisions
 
-### Why psycopg2 over SQLAlchemy?
+**psycopg2 over SQLAlchemy** — The query surface is narrow: four read endpoints and one bulk insert. SQLAlchemy's ORM would add boilerplate with no benefit. Raw psycopg2 with a connection pool keeps the data layer transparent.
 
-This app has a narrow, well-defined query surface — four endpoints, all straightforward reads and one bulk insert. SQLAlchemy's abstraction layer would add ~300 lines of ORM model boilerplate that buys nothing here. Raw psycopg2 with a connection pool keeps the data layer transparent and fast. The SQL lives in the queries themselves, not hidden behind `session.query()` chains.
+**Database views over in-router joins** — Moving join logic into `v_equipment_full` keeps each router to a single `SELECT *` and lets the database optimizer handle it. The view is also reusable across endpoints.
 
-### Why a flat `v_equipment_full` view instead of nested joins in the router?
+**SVG floor plan over a mapping library** — The wing layout is static and known at build time. A geographic mapping library (Leaflet, Mapbox) is oversized for a fixed 7-room layout. Hand-authored SVG loads instantly with no tile dependencies.
 
-Moving the join logic into a database view means the API router stays simple (`SELECT * FROM v_equipment_full WHERE facility_id = %s`) and the view can be optimized at the DB layer without touching Python. Supabase runs PostgreSQL 15 which handles this well. The view is also reusable — both the floor plan and the equipment panel read from the same projection.
+**Condition scores 1–5 as integers** — Numeric scores are sortable, aggregatable, and filterable with simple range checks. The capital planning report's `FILTER (WHERE condition_score <= 2)` clauses depend on this. Text labels are applied in the UI layer where they belong.
 
-### Why SVG floor plan instead of a mapping library (Leaflet, Mapbox)?
+**Fixed UUIDs in seed data** — Deterministic IDs mean `VITE_FACILITY_ID` can be documented with a concrete value. It also makes the seed idempotent-friendly for re-runs.
 
-Jail wing layouts are fixed and known at build time. A general mapping library designed for dynamic geographic data is oversized for a static 7-room layout. Hand-authored SVG gives pixel-perfect control, zero tile dependencies, ships as part of the React bundle, and loads instantly. Room positions are defined as a plain array in `FloorPlan.jsx` and matched to DB data by `room_name` — no extra API calls needed.
-
-### Why condition scores 1–5 instead of free-text labels?
-
-Numeric scores are sortable, aggregatable, and filterable with a simple `WHERE condition_score <= 2`. The capital planning report's `FILTER` clauses in `v_capital_summary` depend on this. Text labels like "Critical" require either an `ENUM` (schema migration on every label change) or case-insensitive string comparisons — both more brittle. Labels are applied in the UI layer (`ConditionBadge.jsx`) where they belong.
-
-### Why a separate `onboard_facility.py` instead of just using the upload API?
-
-The upload endpoint is designed for browser-initiated single-file uploads over HTTPS. The onboarding script is a server-side batch operation: it pulls from a private S3 bucket using IAM credentials, handles large files without browser memory limits, supports `--dry-run` for pre-flight validation, and can be scheduled in CI. Keeping these two paths separate avoids adding S3 credentials to the FastAPI process unnecessarily.
-
-### Why fixed UUIDs in seed.sql?
-
-Deterministic IDs mean `VITE_FACILITY_ID` and the SVG room name mapping can be documented with concrete values rather than "run the seed and look up the IDs." It also makes the seed idempotent-friendly — re-running it with `INSERT ... ON CONFLICT DO NOTHING` would be safe to add later.
+**Transaction Pooler over Direct connection** — Vercel's serverless functions don't support persistent TCP connections, and Vercel Hobby doesn't have outbound IPv6. Supabase's Transaction Pooler (PgBouncer, port 6543, IPv4) handles both constraints.
