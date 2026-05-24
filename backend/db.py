@@ -1,20 +1,24 @@
 import psycopg2
 from psycopg2 import pool as pg_pool
 from contextlib import contextmanager
+from urllib.parse import urlparse, unquote
 from config import settings
 
-# Module-level connection pool — created once on first import, reused across requests.
-# minconn=1 keeps a warm connection; maxconn=10 matches Railway's free-tier concurrency.
 _pool: pg_pool.ThreadedConnectionPool | None = None
 
 
 def get_pool() -> pg_pool.ThreadedConnectionPool:
     global _pool
     if _pool is None:
+        url = urlparse(settings.database_url)
         _pool = pg_pool.ThreadedConnectionPool(
             minconn=1,
             maxconn=10,
-            dsn=settings.database_url,
+            host=url.hostname,
+            port=url.port or 5432,
+            user=unquote(url.username or ""),
+            password=unquote(url.password or ""),
+            dbname=(url.path or "/postgres").lstrip("/"),
         )
     return _pool
 
