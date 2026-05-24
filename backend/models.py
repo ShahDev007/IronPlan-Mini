@@ -2,7 +2,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
-from pydantic import BaseModel, Field, UUID4
+from uuid import UUID
+from pydantic import BaseModel, Field
 
 
 # ── Equipment ────────────────────────────────────────────────────────────────
@@ -20,10 +21,10 @@ class EquipmentBase(BaseModel):
 
 
 class EquipmentOut(EquipmentBase):
-    id: UUID4
-    room_id: UUID4
-    created_at: datetime
-    updated_at: datetime
+    id: UUID
+    room_id: UUID
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -32,7 +33,7 @@ class EquipmentFull(EquipmentOut):
     """Includes denormalized room + facility context (from v_equipment_full)."""
     room_name: str
     room_type: str
-    facility_id: UUID4
+    facility_id: UUID
     facility_name: str
     county: Optional[str] = None
     state: Optional[str] = None
@@ -41,7 +42,7 @@ class EquipmentFull(EquipmentOut):
 # ── Capital Planning Report ───────────────────────────────────────────────────
 
 class CapitalReport(BaseModel):
-    facility_id: UUID4
+    facility_id: UUID
     facility_name: str
     total_equipment: int
     critical_count: int        # score 1
@@ -55,7 +56,7 @@ class CapitalReport(BaseModel):
 
 
 class RoomSummary(BaseModel):
-    room_id: UUID4
+    room_id: UUID
     room_name: str
     room_type: str
     equipment_count: int
