@@ -1,12 +1,19 @@
 import io
 import uuid
-from typing import Annotated
 
+import boto3
 import pandas as pd
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from botocore.exceptions import ClientError
+from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from pydantic import BaseModel
 
+from config import settings
 from db import get_conn
 from models import UploadResult
+
+
+class S3IngestRequest(BaseModel):
+    s3_key: str
 
 router = APIRouter(prefix="/equipment", tags=["equipment"])
 
@@ -93,6 +100,97 @@ async def upload_equipment_csv(file: UploadFile = File(...)):
     with get_conn() as conn:
         cur = conn.cursor()
 
+        for idx, row in df.iterrows():
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO equipment (
+                        room_id, name, type, condition_score,
+                        last_inspected, replacement_cost, notes,
+                        serial_number, manufacturer, install_year
+                    ) VALUES (
+                        %(room_id)s, %(name)s, %(type)s, %(condition_score)s,
+                        %(last_inspected)s, %(replacement_cost)s, %(notes)s,
+                        %(serial_number)s, %(manufacturer)s, %(install_year)s
+                    )
+                    """,
+                    {
+                        "room_id": str(row["room_id"]),
+                        "name": str(row["name"]),
+                        "type": str(row["type"]),
+                        "condition_score": int(row["condition_score"]),
+                        "last_inspected": row.get("last_inspected") or None,
+                        "replacement_cost": row.get("replacement_cost") or None,
+                        "notes": row.get("notes") or None,
+                        "serial_number": row.get("serial_number") or None,
+                        "manufacturer": row.get("manufacturer") or None,
+                        "install_year": int(row["install_year"]) if pd.notna(row.get("install_year")) else None,
+                    },
+                )
+                inserted += 1
+            except Exception as exc:
+                conn.rollback()
+                skipped += 1
+                row_errors.append(f"Row {idx}: {exc}")
+
+    return UploadResult(
+        rows_received=rows_received,
+        rows_inserted=inserted,
+        rows_skipped=skipped,
+        errors=row_errors,
+    )
+
+
+@router.post("/ingest-s3", response_model=UploadResult, status_code=status.HTTP_200_OK)
+def ingest_from_s3(body: S3IngestRequest):
+    """Download a CSV from S3 and bulk-insert it into the equipment table."""
+    if not settings.aws_access_key_id or not settings.s3_bucket:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AWS credentials not configured.",
+        )
+
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=settings.aws_access_key_id,
+        aws_secret_access_key=settings.aws_secret_access_key,
+        region_name=settings.aws_region,
+    )
+
+    try:
+        response = s3.get_object(Bucket=settings.s3_bucket, Key=body.s3_key)
+        raw = response["Body"].read()
+    except ClientError as exc:
+        code = exc.response["Error"]["Code"]
+        if code in ("NoSuchKey", "404"):
+            raise HTTPException(status_code=404, detail=f"S3 object not found: {body.s3_key}")
+        raise HTTPException(status_code=400, detail=f"S3 error: {exc}")
+
+    try:
+        df = pd.read_csv(io.BytesIO(raw), dtype=str)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse CSV: {exc}")
+
+    df["condition_score"] = pd.to_numeric(df.get("condition_score", pd.Series(dtype=str)), errors="coerce")
+    if "replacement_cost" in df.columns:
+        df["replacement_cost"] = pd.to_numeric(df["replacement_cost"], errors="coerce")
+    if "install_year" in df.columns:
+        df["install_year"] = pd.to_numeric(df["install_year"], errors="coerce")
+
+    validation_errors = _validate_df(df)
+    if validation_errors:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"validation_errors": validation_errors},
+        )
+
+    rows_received = len(df)
+    inserted = 0
+    skipped = 0
+    row_errors: list[str] = []
+
+    with get_conn() as conn:
+        cur = conn.cursor()
         for idx, row in df.iterrows():
             try:
                 cur.execute(

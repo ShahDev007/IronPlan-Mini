@@ -1,0 +1,8 @@
+room_id,name,type,condition_score,replacement_cost,manufacturer,install_year,notes
+22222222-2222-2222-2222-222222222201,Body Scanner X200,Security Scanner,2,45000,Smiths Detection,2017,Due for replacement
+22222222-2222-2222-2222-222222222201,Intercom Panel,Communication,4,1200,Aiphone,2021,
+22222222-2222-2222-2222-222222222202,Fingerprint Terminal,Biometric,3,3500,Suprema,2019,Sensor degraded
+22222222-2222-2222-2222-222222222203,Surveillance Monitor,Camera System,5,800,Samsung,2023,
+22222222-2222-2222-2222-222222222204,Cell Door Motor B-12,Mechanical,1,8000,Norment,2011,Immediate repair needed
+22222222-2222-2222-2222-222222222205,Defibrillator,Medical,4,2800,Zoll,2022,
+22222222-2222-2222-2222-222222222206,Visitation Phone Unit,Communication,3,600,Global Tel Link,2018,

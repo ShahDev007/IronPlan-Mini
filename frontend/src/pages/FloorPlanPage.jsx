@@ -3,6 +3,7 @@ import FloorPlan from '../components/FloorPlan'
 import EquipmentPanel from '../components/EquipmentPanel'
 import FilterBar from '../components/FilterBar'
 import CsvUpload from '../components/CsvUpload'
+import S3Ingest from '../components/S3Ingest'
 
 export default function FloorPlanPage({
   equipment,
@@ -58,6 +59,15 @@ export default function FloorPlanPage({
               Import Equipment CSV
             </p>
             <CsvUpload onSuccess={onUploadSuccess} />
+          </div>
+
+          {/* S3 Ingest */}
+          <div className="bg-white border border-slate-200 rounded-lg p-4">
+            <p className="text-xs font-semibold text-slate-600 uppercase tracking-widest mb-1">
+              Import from S3
+            </p>
+            <p className="text-xs text-slate-400 mb-3">Enter an S3 object key to pull and ingest a CSV directly from the bucket.</p>
+            <S3Ingest onSuccess={onUploadSuccess} />
           </div>
         </div>
 

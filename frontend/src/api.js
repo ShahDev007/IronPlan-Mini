@@ -20,6 +20,13 @@ export const fetchFacilityReport = (facilityId) =>
 export const fetchRoomEquipment = (roomId) =>
   request(`/rooms/${roomId}/equipment`)
 
+export const ingestFromS3 = (s3Key) =>
+  request('/equipment/ingest-s3', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ s3_key: s3Key }),
+  })
+
 export async function uploadEquipmentCsv(file) {
   const form = new FormData()
   form.append('file', file)
