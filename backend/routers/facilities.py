@@ -4,8 +4,8 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, status
 from psycopg2.extras import RealDictCursor
 
-from ..db import get_conn
-from ..models import CapitalReport, EquipmentFull, RoomSummary
+from db import get_conn
+from models import CapitalReport, EquipmentFull, RoomSummary
 
 router = APIRouter(prefix="/facilities", tags=["facilities"])
 

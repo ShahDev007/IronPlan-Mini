@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import equipment, facilities, rooms
+from routers import equipment, facilities, rooms
 
 app = FastAPI(
     title="IronPlan Mini",

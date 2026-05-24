@@ -1,7 +1,7 @@
 import psycopg2
 from psycopg2 import pool as pg_pool
 from contextlib import contextmanager
-from .config import settings
+from config import settings
 
 # Module-level connection pool — created once on first import, reused across requests.
 # minconn=1 keeps a warm connection; maxconn=10 matches Railway's free-tier concurrency.

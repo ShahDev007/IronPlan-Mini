@@ -1,8 +1,7 @@
 import sys
 import os
 
-# Add the repo root to sys.path so `from backend.xxx import ...` works
-# inside the serverless function context on Vercel.
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+# Point to backend/ so absolute imports (from db import ..., from models import ...) resolve correctly.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 
-from backend.main import app  # noqa: F401 — Vercel discovers `app` here
+from main import app  # noqa: F401

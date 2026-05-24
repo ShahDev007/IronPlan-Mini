@@ -5,8 +5,8 @@ from typing import Annotated
 import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
-from ..db import get_conn
-from ..models import UploadResult
+from db import get_conn
+from models import UploadResult
 
 router = APIRouter(prefix="/equipment", tags=["equipment"])
 
